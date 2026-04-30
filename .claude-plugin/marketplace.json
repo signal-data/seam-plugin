@@ -1,9 +1,17 @@
 {
-  "display_name": "Seam AI",
-  "tagline": "Signal-based GTM alerts powered by your Seam org",
-  "category": "sales",
-  "tags": ["abm", "intent", "alerts", "gtm", "slack"],
-  "author": "seam",
-  "repo": "https://github.com/getseam-ai/seam-plugin",
-  "setup": "Add your Seam MCP server: claude mcp add seam --transport http https://mcp.getseam.ai/mcp"
+  "name": "seam",
+  "owner": {
+    "name": "Seam AI",
+    "email": "maxwell@getseam.ai"
+  },
+  "plugins": [
+    {
+      "name": "seam",
+      "source": ".",
+      "description": "AI-powered GTM workflows for Seam orgs — account alerts, signal monitoring, and weekly digests.",
+      "author": { "name": "Seam AI" },
+      "category": "sales",
+      "tags": ["abm", "intent", "alerts", "gtm", "slack"]
+    }
+  ]
 }
