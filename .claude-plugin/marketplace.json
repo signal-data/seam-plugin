@@ -1,4 +1,5 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "seam",
   "owner": {
     "name": "Seam AI",
@@ -7,11 +8,14 @@
   "plugins": [
     {
       "name": "seam",
-      "source": ".",
       "description": "AI-powered GTM workflows for Seam orgs — account alerts, signal monitoring, and weekly digests.",
       "author": { "name": "Seam AI" },
       "category": "sales",
-      "tags": ["abm", "intent", "alerts", "gtm", "slack"]
+      "tags": ["abm", "intent", "alerts", "gtm", "slack"],
+      "source": {
+        "source": "url",
+        "url": "https://github.com/signal-data/seam-plugin"
+      }
     }
   ]
 }
