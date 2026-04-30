@@ -76,7 +76,7 @@ Step 4: Generate slug and write config
 Step 5: Schedule the remote agent
   Invoke `/schedule` to create a recurring remote agent with:
   - Schedule: the cron expression
-  - Prompt: "You are executing a Seam alert workflow. Read the config at `alerts/active/<slug>.json`. Then load and execute the workflow at `workflows/<workflow>.workflow.md`, substituting all `{{variable}}` placeholders with the values from the config's `inputs` object. Use the Seam MCP tools to query data. Deliver results to the channel specified in the inputs."
+  - Prompt: "You are executing a Seam alert workflow in the seam-plugin repository. Your working directory is the root of the seam-plugin repository. Read the config at `alerts/active/<slug>.json`. Then load and execute the workflow at `workflows/<workflow>.workflow.md`, substituting all `{{variable}}` placeholders with the values from the config's `inputs` object. Use the Seam MCP tools to query data. Deliver results to the channel specified in the inputs."
 
 Step 6: Save routine_id
   After `/schedule` returns the routine ID, update `alerts/active/<slug>.json` to set `routine_id` to the returned value.
@@ -118,7 +118,9 @@ Step 1: If the user named a specific alert:
 
 Step 2: Read the matching config file to get `routine_id`.
 
-Step 3: Cancel the scheduled routine using the routine_id via the schedule management tools.
+Step 3: Cancel the scheduled routine.
+  Read `routine_id` from the config. If it is empty string or missing, skip cancellation and tell the user: "No scheduled routine was found for this alert — the alert config will be deleted but there is nothing to cancel."
+  Otherwise, cancel the routine using the routine_id via the schedule management tools.
 
 Step 4: Delete `alerts/active/<slug>.json`.
 
