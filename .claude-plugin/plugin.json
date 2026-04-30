@@ -1,0 +1,9 @@
+{
+  "name": "seam",
+  "version": "0.1.0",
+  "description": "AI-powered GTM workflows for Seam orgs — account alerts, signal monitoring, and weekly digests.",
+  "skills": "skills/",
+  "workflows": "workflows/",
+  "agents": "agents/",
+  "docs": "docs/org-instructions/"
+}
