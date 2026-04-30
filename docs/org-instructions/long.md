@@ -17,7 +17,13 @@
    claude mcp add seam --transport http https://mcp.getseam.ai/mcp
    ```
 
-3. Verify the connection: ask Claude "Who am I in Seam?"
+3. Connect your Slack MCP server (required for Slack alert delivery):
+   ```
+   claude mcp add slack --transport http https://mcp.slack.com/mcp
+   ```
+   Or, if you use a different Slack MCP, ensure the tool `slack_send_message` is available and its permission is added to your Claude settings.
+
+4. Verify the connection: ask Claude "Who am I in Seam?"
 
 ## Creating Alerts
 

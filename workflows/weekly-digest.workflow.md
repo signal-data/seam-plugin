@@ -38,11 +38,11 @@ Step 1: Query top accounts by intent score
   save_as: top_accounts
 
 Step 2: Query recent activities for top accounts
-  Collect SEAM_COMPANY_ID values from top_accounts.
+  From the top_accounts result, collect all SEAM_COMPANY_ID values into a comma-separated list.
   search_activities({
     relationFilters: [{
       relation: "companies",
-      filter: "SEAM_COMPANY_ID=in=({{top_accounts | map: 'SEAM_COMPANY_ID' | join: ','}})"
+      filter: "SEAM_COMPANY_ID=in=(<comma-separated list of SEAM_COMPANY_ID values from top_accounts>)"
     }],
     fields: [
       "SEAM_ACTIVITY_TYPE",

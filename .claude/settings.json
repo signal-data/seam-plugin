@@ -12,7 +12,8 @@
       "mcp__seam__get_opportunity_fields",
       "mcp__seam__get_user_fields",
       "mcp__seam__get_knowledge",
-      "mcp__seam__get_user_details"
+      "mcp__seam__get_user_details",
+      "mcp__slack__slack_send_message"
     ]
   }
 }
