@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__seam__search_companies",
+      "mcp__seam__search_people",
+      "mcp__seam__search_activities",
+      "mcp__seam__search_opportunities",
+      "mcp__seam__search_users",
+      "mcp__seam__get_company_fields",
+      "mcp__seam__get_people_fields",
+      "mcp__seam__get_activity_fields",
+      "mcp__seam__get_opportunity_fields",
+      "mcp__seam__get_user_fields",
+      "mcp__seam__get_knowledge",
+      "mcp__seam__get_user_details"
+    ]
+  }
+}
