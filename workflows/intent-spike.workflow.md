@@ -18,26 +18,34 @@ inputs:
     type: string
     required: false
     default: "#hot-accounts"
+schedule:
+  default: "0 9 * * 1-5"
+  description: Weekdays at 9 AM in the owner's timezone
+  recommended_cadences:
+    - cron: "0 9 * * 1-5"
+      label: Weekday mornings (recommended)
+      description: Run every weekday at 9 AM — catches overnight intent spikes before the team's first meetings.
+    - cron: "0 9 * * 1"
+      label: Weekly (Monday morning)
+      description: Run once a week on Monday at 9 AM — good for lower-volume teams or higher thresholds.
+    - cron: "0 9,14 * * 1-5"
+      label: Twice daily (weekdays)
+      description: Run at 9 AM and 2 PM on weekdays — for high-velocity teams that want mid-day updates.
 ---
 
-## Link patterns
+## References
 
-Use these URL templates throughout. Only include a link if the ID value is present and non-empty.
-
-- Seam company: `https://app.getseam.ai/companies/{{SEAM_COMPANY_ID}}`
-- Salesforce account: `https://seam.my.salesforce.com/{{SFDC_ACCT_ACCOUNT_ID}}`
-- HubSpot company: `https://app.hubspot.com/contacts/242151588/record/0-2/{{HUBS_COMP_ID}}`
-- Seam person: `https://app.getseam.ai/people/{{SEAM_PEOPLE_ID}}`
-- Salesforce person: `https://seam.my.salesforce.com/{{SFDC_PERSON_ID}}`
-- HubSpot contact: `https://app.hubspot.com/contacts/242151588/record/0-1/{{HUBS_CONTACT_ID}}`
+- See `references/slack-company-alert-format.md` for Slack formatting rules,
+  link patterns, message templates, and summary generation guidelines.
+- All message formatting in this workflow follows that shared reference.
 
 ---
 
 ## Steps
 
-Step 1: Query accounts with spiking intent
+Step 1a: Query A/B fit accounts with spiking intent (priority accounts)
   search_companies({
-    filter: "SEAM_COMPANY_INTENT_SCORE>={{threshold}}",
+    filter: "SEAM_COMPANY_INTENT_SCORE>={{threshold}};SEAM_COMPANY_FIT_SCORE=in=(A,B)",
     relationFilters: [{ relation: "users", filter: "SEAM_USER_EMAIL=='{{owner_email}}'" }],
     fields: [
       "SEAM_COMPANY_ID",
@@ -45,16 +53,20 @@ Step 1: Query accounts with spiking intent
       "SEAM_COMPANY_DOMAIN",
       "SEAM_COMPANY_INDUSTRY",
       "SEAM_COMPANY_EMPLOYEES",
+      "SEAM_COMPANY_DESCRIPTION",
       "SEAM_COMPANY_INTENT_SCORE",
       "SEAM_COMPANY_INTENT_LEVEL",
+      "SEAM_COMPANY_INTENT_DETAILS",
       "SEAM_COMPANY_FIT_SCORE",
       "SEAM_COMPANY_FIT_NAME",
+      "SEAM_COMPANY_FIT_EXPLANATION",
       "SEAM_COMPANY_SIGNAL_SCORE",
       "SEAM_COMPANY_SIGNAL_STRENGTH",
       "SEAM_COMPANY_REACH_SCORE",
       "SEAM_COMPANY_REACH_LEVEL",
       "SEAM_COMPANY_ABM_STAGE",
-      "SEAM_COMPANY_BUYING_STAGE",
+      "SEAM_COMPANY_ABM_STAGE_DESCRIPTION",
+      "SEAM_COMPANY_INTERESTS",
       "SEAM_COMPANY_LAST_ACTIVE_DATE",
       "SEAM_COMPANY_OWNER_EMAIL",
       "SEAM_COMPANY_OWNER_FULL_NAME",
@@ -63,18 +75,37 @@ Step 1: Query accounts with spiking intent
       "HUBS_COMP_ID"
     ],
     sort: "SEAM_COMPANY_INTENT_SCORE,desc",
+    size: 10
+  })
+  save_as: priority_accounts
+
+Step 1b: Query all accounts with spiking intent (for total count + backfill)
+  search_companies({
+    filter: "SEAM_COMPANY_INTENT_SCORE>={{threshold}}",
+    relationFilters: [{ relation: "users", filter: "SEAM_USER_EMAIL=='{{owner_email}}'" }],
+    fields: [same as Step 1a],
+    sort: "SEAM_COMPANY_INTENT_SCORE,desc",
+    size: 10,
     includeTotal: true
   })
-  save_as: spiking_accounts
+  save_as: all_accounts
   save total count as: total_spiking
 
 Step 2: Check if any results
-  condition: spiking_accounts.length == 0
+  condition: all_accounts.length == 0
   if true: exit silently — no alert needed
 
-Step 3: Split results
-  top_10 = spiking_accounts.slice(0, 10)
+Step 3: Merge and prioritize top 10
+  Build the final list by taking A/B fit accounts first, then backfilling:
+    1. Start with all accounts from priority_accounts (A/B fit), sorted by intent desc
+    2. If fewer than 10, backfill from all_accounts — skip any already included
+       (match on SEAM_COMPANY_ID to deduplicate)
+    3. Cap at 10 total
+  save_as: top_10
   remaining_count = total_spiking - top_10.length
+
+  If priority_accounts is empty (no A/B fit accounts, or all fit scores are null),
+  fall back to all_accounts sorted by intent score desc — same as before.
 
 Step 4: Look up owner Slack user ID
   slack_search_users({ query: "{{owner_email}}" })
@@ -97,45 +128,56 @@ Step 5: Query top contacts for each top-10 account
         "SEAM_PEOPLE_BUYING_STAGE",
         "SEAM_PEOPLE_CHAMPION",
         "SEAM_PEOPLE_ASSOCIATED_TO_OPPORTUNITY",
-        "SFDC_PERSON_ID",
-        "HUBS_CONTACT_ID"
+        "SFDC_PERSON_ID"
       ],
       sort: "SEAM_PEOPLE_INTENT_SCORE,desc",
       size: 3
     })
     save_as: account.top_contacts
 
-Step 6: Send parent message (Account #1)
-  Build the message for the first account in top_10. Use Slack mrkdwn formatting.
+Step 6: Generate summary for each top-10 account
+  For each account in top_10, compose a 1–2 sentence **Summary** by combining
+  the actual data from these fields:
+    - SEAM_COMPANY_FIT_EXPLANATION (why the fit score is what it is)
+    - SEAM_COMPANY_ABM_STAGE_DESCRIPTION (engagement signals and topic/social mentions)
+    - SEAM_COMPANY_INTERESTS (topics/keywords the account is researching)
+    - SEAM_COMPANY_INTENT_DETAILS (specific topic surges with scores driving the intent)
+  Write it in plain English. Include specific topic names and surge scores from
+  the intent details (e.g. "surging on ABM (79), Predictive Lead Scoring (69)").
+  Reference the fit explanation to explain why fit is rated the way it is.
+  Mention engagement details from the ABM stage description.
+  Skip any field that is null or empty.
+  save_as: account.summary
+
+Step 7: Send parent message (Account #1)
+  Build the message for the first account in top_10.
 
   ---
   MESSAGE FORMAT — Parent (Account #1):
   ---
 
-  🔥 *Intent Spike Alert* — {{total_spiking}} account(s) at or above {{threshold}} intent
-  {{if owner_slack_id}} <@{{owner_slack_id}}> {{endif}}
-
-  ━━━━━━━━━━━━━━━━━━━━━━━━
-
-  *{{SEAM_COMPANY_NAME}}* — _{{SEAM_COMPANY_INDUSTRY}}_
-  {{SEAM_COMPANY_EMPLOYEES}} employees
-
-  *Scores*
-  🎯 Intent: *{{SEAM_COMPANY_INTENT_SCORE}}* ({{SEAM_COMPANY_INTENT_LEVEL}})  •  💎 Fit: *{{SEAM_COMPANY_FIT_SCORE}}* ({{SEAM_COMPANY_FIT_NAME}})
-  📡 Signal: *{{SEAM_COMPANY_SIGNAL_SCORE}}* ({{SEAM_COMPANY_SIGNAL_STRENGTH}})  •  📣 Reach: *{{SEAM_COMPANY_REACH_SCORE}}* ({{SEAM_COMPANY_REACH_LEVEL}})
-
-  *Stage:* {{SEAM_COMPANY_ABM_STAGE}}  •  *Buying Stage:* {{SEAM_COMPANY_BUYING_STAGE}}
-  *Last Active:* {{SEAM_COMPANY_LAST_ACTIVE_DATE}}  •  *Owner:* {{SEAM_COMPANY_OWNER_FULL_NAME}}
-
+  🔔 <@{{owner_slack_id}}> - New High Intent Company Alert!
+  ⠀
+  **Company Name:** {{SEAM_COMPANY_NAME}}
+  {{SEAM_COMPANY_INDUSTRY}} · {{SEAM_COMPANY_EMPLOYEES}} employees
+  ⠀
+  **Intent:** {{SEAM_COMPANY_INTENT_SCORE}} ({{SEAM_COMPANY_INTENT_LEVEL}})
+  **Fit:** {{SEAM_COMPANY_FIT_SCORE}} ({{SEAM_COMPANY_FIT_NAME}})
+  **Signal:** {{SEAM_COMPANY_SIGNAL_SCORE}} ({{SEAM_COMPANY_SIGNAL_STRENGTH}})
+  **Reach:** {{SEAM_COMPANY_REACH_SCORE}} ({{SEAM_COMPANY_REACH_LEVEL}})
+  **ABM Stage:** {{SEAM_COMPANY_ABM_STAGE}}
+  **Last Active:** {{SEAM_COMPANY_LAST_ACTIVE_DATE formatted as Mon DD}}
+  **Owner:** {{SEAM_COMPANY_OWNER_FULL_NAME}}
+  ⠀
   {{if account.top_contacts.length > 0}}
-  *Top Contacts*
-  {{for each contact in account.top_contacts}}
-  • *{{SEAM_PEOPLE_FIRST_NAME}} {{SEAM_PEOPLE_LAST_NAME}}* — {{SEAM_PEOPLE_TITLE}}
-    Intent: {{SEAM_PEOPLE_INTENT_SCORE}} ({{SEAM_PEOPLE_INTENT_LEVEL}}) · Buying: {{SEAM_PEOPLE_BUYING_STAGE}} {{if SEAM_PEOPLE_CHAMPION}} · 🏆 Champion{{endif}}
-    <{{seam_person_link}}|Seam>{{if SFDC_PERSON_ID}} · <{{sfdc_person_link}}|Salesforce>{{endif}}{{if HUBS_CONTACT_ID}} · <{{hubspot_person_link}}|HubSpot>{{endif}}
-  {{end for}}
+  **Top Contacts:**
+     {{for each contact in account.top_contacts}}
+     • {{SEAM_PEOPLE_FIRST_NAME}} {{SEAM_PEOPLE_LAST_NAME}} — _{{SEAM_PEOPLE_TITLE}}_
+     {{end for}}
+  ⠀
   {{endif}}
-
+  **Summary:** {{account.summary}}
+  ⠀
   <{{seam_company_link}}|View in Seam>{{if SFDC_ACCT_ACCOUNT_ID}} · <{{sfdc_account_link}}|Salesforce>{{endif}}{{if HUBS_COMP_ID}} · <{{hubspot_company_link}}|HubSpot>{{endif}}{{if SEAM_COMPANY_LINKEDIN_URL}} · <{{SEAM_COMPANY_LINKEDIN_URL}}|LinkedIn>{{endif}}
 
   ---
@@ -149,33 +191,33 @@ Step 6: Send parent message (Account #1)
   Capture the returned message timestamp.
   save_as: parent_ts
 
-Step 7: Send thread replies (Accounts #2–10)
+Step 8: Send thread replies (Accounts #2–10)
   For each account in top_10[1..9] (index 1 through 9):
-    Build the message using the same format as Step 6 but WITHOUT the header line (no 🔥 line and no @mention). Start directly from the company name.
 
     ---
     MESSAGE FORMAT — Thread reply (Accounts #2–10):
     ---
 
-    *{{SEAM_COMPANY_NAME}}* — _{{SEAM_COMPANY_INDUSTRY}}_
-    {{SEAM_COMPANY_EMPLOYEES}} employees
-
-    *Scores*
-    🎯 Intent: *{{SEAM_COMPANY_INTENT_SCORE}}* ({{SEAM_COMPANY_INTENT_LEVEL}})  •  💎 Fit: *{{SEAM_COMPANY_FIT_SCORE}}* ({{SEAM_COMPANY_FIT_NAME}})
-    📡 Signal: *{{SEAM_COMPANY_SIGNAL_SCORE}}* ({{SEAM_COMPANY_SIGNAL_STRENGTH}})  •  📣 Reach: *{{SEAM_COMPANY_REACH_SCORE}}* ({{SEAM_COMPANY_REACH_LEVEL}})
-
-    *Stage:* {{SEAM_COMPANY_ABM_STAGE}}  •  *Buying Stage:* {{SEAM_COMPANY_BUYING_STAGE}}
-    *Last Active:* {{SEAM_COMPANY_LAST_ACTIVE_DATE}}  •  *Owner:* {{SEAM_COMPANY_OWNER_FULL_NAME}}
-
+    **Company Name:** {{SEAM_COMPANY_NAME}}
+    {{SEAM_COMPANY_INDUSTRY}} · {{SEAM_COMPANY_EMPLOYEES}} employees
+    ⠀
+    **Intent:** {{SEAM_COMPANY_INTENT_SCORE}} ({{SEAM_COMPANY_INTENT_LEVEL}})
+    **Fit:** {{SEAM_COMPANY_FIT_SCORE}} ({{SEAM_COMPANY_FIT_NAME}})
+    **Signal:** {{SEAM_COMPANY_SIGNAL_SCORE}} ({{SEAM_COMPANY_SIGNAL_STRENGTH}})
+    **Reach:** {{SEAM_COMPANY_REACH_SCORE}} ({{SEAM_COMPANY_REACH_LEVEL}})
+    **ABM Stage:** {{SEAM_COMPANY_ABM_STAGE}}
+    **Last Active:** {{SEAM_COMPANY_LAST_ACTIVE_DATE formatted as Mon DD}}
+    **Owner:** {{SEAM_COMPANY_OWNER_FULL_NAME}}
+    ⠀
     {{if account.top_contacts.length > 0}}
-    *Top Contacts*
-    {{for each contact in account.top_contacts}}
-    • *{{SEAM_PEOPLE_FIRST_NAME}} {{SEAM_PEOPLE_LAST_NAME}}* — {{SEAM_PEOPLE_TITLE}}
-      Intent: {{SEAM_PEOPLE_INTENT_SCORE}} ({{SEAM_PEOPLE_INTENT_LEVEL}}) · Buying: {{SEAM_PEOPLE_BUYING_STAGE}} {{if SEAM_PEOPLE_CHAMPION}} · 🏆 Champion{{endif}}
-      <{{seam_person_link}}|Seam>{{if SFDC_PERSON_ID}} · <{{sfdc_person_link}}|Salesforce>{{endif}}{{if HUBS_CONTACT_ID}} · <{{hubspot_person_link}}|HubSpot>{{endif}}
-    {{end for}}
+    **Top Contacts:**
+       {{for each contact in account.top_contacts}}
+       • {{SEAM_PEOPLE_FIRST_NAME}} {{SEAM_PEOPLE_LAST_NAME}} — _{{SEAM_PEOPLE_TITLE}}_
+       {{end for}}
+    ⠀
     {{endif}}
-
+    **Summary:** {{account.summary}}
+    ⠀
     <{{seam_company_link}}|View in Seam>{{if SFDC_ACCT_ACCOUNT_ID}} · <{{sfdc_account_link}}|Salesforce>{{endif}}{{if HUBS_COMP_ID}} · <{{hubspot_company_link}}|HubSpot>{{endif}}{{if SEAM_COMPANY_LINKEDIN_URL}} · <{{SEAM_COMPANY_LINKEDIN_URL}}|LinkedIn>{{endif}}
 
     ---
@@ -188,19 +230,17 @@ Step 7: Send thread replies (Accounts #2–10)
       thread_ts: "{{parent_ts}}"
     })
 
-Step 8: Send summary reply (if remaining accounts exist)
+Step 9: Send summary reply (if remaining accounts exist)
   condition: remaining_count > 0
   if false: skip this step
-
-  Build the summary message:
 
   ---
   MESSAGE FORMAT — Summary:
   ---
 
-  📊 *Plus {{remaining_count}} more account(s)* at or above {{threshold}} intent score.
-
-  <https://app.getseam.ai/companies|View all accounts in Seam>
+  **+ {{remaining_count}} more account(s)** above {{threshold}} intent score.
+  ⠀
+  <https://app.getseam.ai/companies|View all in Seam>
 
   ---
   END MESSAGE FORMAT
